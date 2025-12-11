@@ -1,13 +1,16 @@
-from pydantic import BaseModel,Field
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
+import google.generativeai as genai
 
 load_dotenv()
 
-api_key = os.getenv("OPENAI_API")
+api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    raise ValueError("API key not found. Make sure it is defined in the .env file.")
+    raise ValueError("GEMINI_API_KEY not found. Make sure it is defined in the .env file.")
+
+genai.configure(api_key=api_key)
 
 class JSONResponse(BaseModel):
     """
@@ -50,43 +53,68 @@ Return a JSON object with the following structure:
 
 
 def GetHighlight(Transcription):
-    from langchain_openai import ChatOpenAI
+    import json
     
     try:
-        llm = ChatOpenAI(
-            model="gpt-5-nano",  # Much cheaper than gpt-4o
-            temperature=1.0,
-            api_key = api_key
+        # Configure Gemini model with JSON schema
+        generation_config = {
+            "temperature": 1.0,
+            "response_mime_type": "application/json",
+            "response_schema": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "number",
+                        "description": "Start time of the segment in seconds"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The transcribed text from the selected segment (clean text only, NO timestamps)"
+                    },
+                    "end": {
+                        "type": "number",
+                        "description": "End time of the segment in seconds"
+                    }
+                },
+                "required": ["start", "content", "end"]
+            }
+        }
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            generation_config=generation_config
         )
-
-        from langchain.prompts import ChatPromptTemplate
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system",system),
-                ("user",Transcription)
-            ]
-        )
-        chain = prompt |llm.with_structured_output(JSONResponse,method="function_calling")
         
-        print("Calling LLM for highlight selection...")
-        response = chain.invoke({"Transcription":Transcription})
+        # Format the prompt
+        prompt = system.format(Transcription=Transcription)
         
-        # Validate response
-        if not response:
-            print("ERROR: LLM returned empty response")
-            return None, None
+        print("Calling Gemini for highlight selection...")
+        response = model.generate_content(prompt)
         
-        if not hasattr(response, 'start') or not hasattr(response, 'end'):
-            print(f"ERROR: Invalid response structure: {response}")
+        # Parse JSON response
+        if not response or not response.text:
+            print("ERROR: Gemini returned empty response")
             return None, None
         
         try:
-            Start = int(response.start)
-            End = int(response.end)
+            result = json.loads(response.text)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: Could not parse JSON response: {e}")
+            print(f"Response text: {response.text}")
+            return None, None
+        
+        # Validate response structure
+        if not all(key in result for key in ['start', 'content', 'end']):
+            print(f"ERROR: Invalid response structure: {result}")
+            return None, None
+        
+        try:
+            Start = int(result['start'])
+            End = int(result['end'])
         except (ValueError, TypeError) as e:
             print(f"ERROR: Could not parse start/end times from response")
-            print(f"  response.start: {response.start}")
-            print(f"  response.end: {response.end}")
+            print(f"  start: {result.get('start')}")
+            print(f"  end: {result.get('end')}")
             print(f"  Error: {e}")
             return None, None
         
@@ -103,15 +131,15 @@ def GetHighlight(Transcription):
         print(f"\n{'='*60}")
         print(f"SELECTED SEGMENT DETAILS:")
         print(f"Time: {Start}s - {End}s ({End-Start}s duration)")
-        print(f"Content: {response.content}")
+        print(f"Content: {result['content']}")
         print(f"{'='*60}\n")
         
-        if Start==End:
+        if Start == End:
             Ask = input("Error - Get Highlights again (y/n) -> ").lower()
             if Ask == "y":
                 Start, End = GetHighlight(Transcription)
             return Start, End
-        return Start,End
+        return Start, End
         
     except Exception as e:
         print(f"\n{'='*60}")

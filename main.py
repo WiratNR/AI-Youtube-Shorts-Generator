@@ -3,7 +3,7 @@ from Components.Edit import extractAudio, crop_video
 from Components.Transcription import transcribeAudio
 from Components.LanguageTasks import GetHighlight
 from Components.FaceCrop import crop_to_vertical, combine_videos
-from Components.Subtitles import add_subtitles_to_video
+from Components.TextOverlay import add_subtitles_to_video
 import sys
 import os
 import uuid

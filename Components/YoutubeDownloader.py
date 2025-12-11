@@ -1,5 +1,6 @@
 import os
 from pytubefix import YouTube
+from pytubefix.cli import on_progress
 import ffmpeg
 
 def get_video_size(stream):
@@ -8,7 +9,28 @@ def get_video_size(stream):
 
 def download_youtube_video(url):
     try:
-        yt = YouTube(url)
+        # Load po_token and visitor_data from environment variables if available
+        po_token = os.getenv("YOUTUBE_PO_TOKEN")
+        visitor_data = os.getenv("YOUTUBE_VISITOR_DATA")
+        
+        # Initialize YouTube object with authentication
+        if po_token and visitor_data:
+            print("Using po_token authentication...")
+            yt = YouTube(
+                url,
+                on_progress_callback=on_progress,
+                po_token=po_token,
+                visitor_data=visitor_data
+            )
+        else:
+            print("No po_token found, trying with OAuth...")
+            print("This will open a browser for YouTube login (first time only)")
+            yt = YouTube(
+                url,
+                on_progress_callback=on_progress,
+                use_oauth=True,
+                allow_oauth_cache=True
+            )
 
         video_streams = yt.streams.filter(type="video").order_by('resolution').desc()
         audio_stream = yt.streams.filter(only_audio=True).first()
